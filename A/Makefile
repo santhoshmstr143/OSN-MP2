@@ -54,12 +54,12 @@ QEMU = qemu-system-riscv64
 MIN_QEMU_VERSION = 7.2
 
 CC = $(TOOLPREFIX)gcc
-AS = $(TOOLPREFIX)gas
+AS = $(TOOLPREFIX)as
 LD = $(TOOLPREFIX)ld
 OBJCOPY = $(TOOLPREFIX)objcopy
 OBJDUMP = $(TOOLPREFIX)objdump
 
-CFLAGS = -Wall -Werror -Wno-unknown-attributes -O -fno-omit-frame-pointer -ggdb -gdwarf-2
+CFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb -gdwarf-2
 CFLAGS += -MD
 CFLAGS += -mcmodel=medany
 CFLAGS += -ffreestanding
@@ -142,6 +142,16 @@ UPROGS=\
 	$U/_logstress\
 	$U/_forphan\
 	$U/_dorphan\
+	$U/_test_demand_basic\
+    $U/_test_invalid\
+    $U/_test_invalid_bounds\
+    $U/_test_replacement\
+    $U/_test_swapping\
+    $U/_test_swapfile\
+    $U/_test_swap_full\
+    $U/_test_memstat\
+    $U/_test_fifo\
+    $U/_test_multipage\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

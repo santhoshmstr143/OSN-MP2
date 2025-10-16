@@ -23,7 +23,7 @@ void            consoleintr(int);
 void            consputc(int);
 
 // exec.c
-int             kexec(char*, char**);
+int             exec(char*, char**);
 
 // file.c
 struct file*    filealloc(void);
@@ -39,6 +39,7 @@ void            fsinit(int);
 int             dirlink(struct inode*, char*, uint);
 struct inode*   dirlookup(struct inode*, char*, uint*);
 struct inode*   ialloc(uint, short);
+struct inode*   create(char*, short, short, short);
 struct inode*   idup(struct inode*);
 void            iinit();
 void            ilock(struct inode*);
@@ -169,6 +170,8 @@ int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 int             ismapped(pagetable_t, uint64);
 uint64          vmfault(pagetable_t, uint64, int);
+int             demand_page_load(pagetable_t, struct proc*, uint64, int, int);
+int             demand_page_load_new(uint64 va, int write, int exec);
 
 // plic.c
 void            plicinit(void);
@@ -180,6 +183,19 @@ void            plic_complete(int);
 void            virtio_disk_init(void);
 void            virtio_disk_rw(struct buf *, int);
 void            virtio_disk_intr(void);
+
+// demand paging and swapping
+void            init_swap_file(struct proc *p);
+void            cleanup_swap_file(struct proc *p);
+int             swap_out_page(struct proc *p, uint64 va, int slot);
+int             swap_in_page(struct proc *p, uint64 va, int slot, char *mem);
+int             find_victim_page(struct proc *p);
+void            add_resident_page(struct proc *p, uint64 va, int is_dirty);
+void            remove_resident_page(struct proc *p, uint64 va);
+int             find_free_swap_slot(struct proc *p);
+
+// system calls
+uint64          sys_memstat(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

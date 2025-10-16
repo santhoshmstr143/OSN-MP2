@@ -81,6 +81,18 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+// forward declare inode so lazy_seg can reference it
+struct inode;
+
+// describe a file-backed segment for demand loading
+struct lazy_seg {
+  uint64 vaddr;     // segment virtual start
+  uint64 filesz;    // bytes in file
+  uint64 memsz;     // bytes in memory
+  uint64 fileoff;   // offset in file
+  struct inode *ip; // inode that backs this segment (exec)
+};
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -104,4 +116,37 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // Lazy/demand paging metadata
+  struct lazy_seg lazy_segs[16]; // record PT_LOAD segments (text/data)
+  int lazy_nseg;
+  uint64 lazy_heap_start; // first byte of heap (start of sbrk region)
+  uint64 lazy_stack_top;  // top of user stack (virtual)
+  uint64 lazy_max_addr;   // highest address we've allocated (for cleanup)
+  uint64 pf_seq;          // per-process FIFO sequence number for RESIDENT logs
+  
+  // Complete demand paging and swapping support
+  uint64 text_start, text_end;    // Text segment bounds
+  uint64 data_start, data_end;    // Data segment bounds
+  
+  // Resident page tracking for FIFO replacement
+  struct {
+    uint64 va;        // Virtual address (page-aligned)
+    int seq;          // FIFO sequence number
+    int is_dirty;     // Dirty bit (1 if written)
+    int swap_slot;    // Swap slot if swapped out (-1 if not swapped)
+  } resident_pages[256];
+  int num_resident;   // Current number of resident pages
+
+  // Swapped pages tracking (WITH data storage - simulated swap)
+  struct {
+    uint64 va;
+    int slot;
+    char data[4096];  // ACTUAL PAGE DATA stored here
+  } swapped_pages[256];
+  int num_swapped;
+  
+  // Swap file management (in-memory simulation)
+  char swap_filename[16];        // Swap file name (/pgswpXXXXX)
+  int swap_slots[1024];          // Bitmap for swap slots (1=used, 0=free)
 };

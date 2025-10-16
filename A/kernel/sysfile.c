@@ -242,7 +242,7 @@ bad:
   return -1;
 }
 
-static struct inode*
+struct inode*
 create(char *path, short type, short major, short minor)
 {
   struct inode *ip, *dp;
@@ -461,7 +461,7 @@ sys_exec(void)
       goto bad;
   }
 
-  int ret = kexec(path, argv);
+  int ret = exec(path, argv);
 
   for(i = 0; i < NELEM(argv) && argv[i] != 0; i++)
     kfree(argv[i]);

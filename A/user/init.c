@@ -23,6 +23,17 @@ main(void)
   dup(0);  // stdout
   dup(0);  // stderr
 
+  // Run PagedOut Inc. simple test first
+  printf("init: running PagedOut Inc. simple test\n");
+  pid = fork();
+  if(pid == 0){
+    char *test_argv[] = { "simple_test", 0 };
+    exec("simple_test", test_argv);
+    printf("init: exec simple_test failed\n");
+    exit(1);
+  }
+  wait((int *) 0);  // Wait for test to complete
+  
   for(;;){
     printf("init: starting sh\n");
     pid = fork();

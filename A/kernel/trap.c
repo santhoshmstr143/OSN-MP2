@@ -44,7 +44,7 @@ usertrap(void)
 
   // send interrupts and exceptions to kerneltrap(),
   // since we're now in the kernel.
-  w_stvec((uint64)kernelvec);  //DOC: kernelvec
+  w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
   
@@ -53,9 +53,8 @@ usertrap(void)
   
   if(r_scause() == 8){
     // system call
-
     if(killed(p))
-      kexit(-1);
+      setkilled(p);
 
     // sepc points to the ecall instruction,
     // but we want to return to the next instruction.
@@ -68,22 +67,37 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else if((r_scause() == 15 || r_scause() == 13) &&
-            vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0) != 0) {
-    // page fault on lazily-allocated page
   } else {
-    printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
+    uint64 scause = r_scause();
+    uint64 stval = r_stval(); // faulting virtual address
+    
+    // Handle page faults
+    if (scause == 12 || scause == 13 || scause == 15) {
+      // 12: Instruction page fault, 13: Load page fault, 15: Store/AMO page fault
+      int is_write = (scause == 15) ? 1 : 0;
+      int is_exec = (scause == 12) ? 1 : 0;
+      
+      // Try to handle the page fault with new comprehensive implementation
+      if (demand_page_load_new(stval, is_write, is_exec) == 0) {
+        // Successfully handled page fault, return to user
+        goto usertrapret;
+      }
+      // If demand_page_load failed, fall through to kill process
+    }
+    
+    printf("usertrap(): unexpected scause %lx pid=%d\n", r_scause(), p->pid);
+    printf("            sepc=%lx stval=%lx\n", r_sepc(), r_stval());
     setkilled(p);
   }
 
   if(killed(p))
-    kexit(-1);
+    setkilled(p);
 
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
     yield();
 
+usertrapret:
   prepare_return();
 
   // the user page table to switch to, for trampoline.S
@@ -100,6 +114,11 @@ void
 prepare_return(void)
 {
   struct proc *p = myproc();
+  
+  // If process was killed, force it to exit instead of returning to user space
+  if(killed(p)) {
+    kexit(-1);
+  }
 
   // we're about to switch the destination of traps from
   // kerneltrap() to usertrap(). because a trap from kernel

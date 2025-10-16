@@ -146,6 +146,28 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  // Initialize lazy paging fields
+  p->lazy_heap_start = 0;
+  p->lazy_stack_top = 0;
+  p->lazy_max_addr = 0;
+  p->pf_seq = 0;
+  memset(p->lazy_segs, 0, sizeof(p->lazy_segs));
+  
+  // Initialize PagedOut Inc. fields
+  p->text_start = p->text_end = 0;
+  p->data_start = p->data_end = 0;
+  p->num_resident = 0;
+  p->num_swapped = 0;
+  for(int i = 0; i < 256; i++) {
+    p->resident_pages[i].va = 0;
+    p->resident_pages[i].seq = 0;
+    p->resident_pages[i].is_dirty = 0;
+    p->resident_pages[i].swap_slot = -1;
+  }
+  for(int i = 0; i < 1024; i++) {
+    p->swap_slots[i] = 0;
+  }
+
   return p;
 }
 
@@ -162,6 +184,18 @@ freeproc(struct proc *p)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
   p->sz = 0;
+  
+  // Clean up lazy paging metadata
+  for(int i = 0; i < 16; i++) {
+    if(p->lazy_segs[i].ip) {
+      iput(p->lazy_segs[i].ip);
+      p->lazy_segs[i].ip = 0;
+    }
+  }
+  
+  // Clean up PagedOut Inc. resources
+  cleanup_swap_file(p);
+  
   p->pid = 0;
   p->parent = 0;
   p->name[0] = 0;
@@ -231,25 +265,7 @@ userinit(void)
   release(&p->lock);
 }
 
-// Shrink user memory by n bytes.
-// Return 0 on success, -1 on failure.
-int
-growproc(int n)
-{
-  uint64 sz;
-  struct proc *p = myproc();
 
-  sz = p->sz;
-  if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
-      return -1;
-    }
-  } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
-  }
-  p->sz = sz;
-  return 0;
-}
 
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
@@ -272,6 +288,27 @@ kfork(void)
     return -1;
   }
   np->sz = p->sz;
+
+  // Copy lazy paging metadata
+  np->lazy_heap_start = p->lazy_heap_start;
+  np->lazy_stack_top = p->lazy_stack_top;
+  np->lazy_max_addr = p->lazy_max_addr;
+  np->pf_seq = 0;  // Child starts with fresh FIFO sequence
+  np->lazy_nseg = p->lazy_nseg;
+  
+  // Copy PagedOut Inc. metadata
+  np->text_start = p->text_start;
+  np->text_end = p->text_end;
+  np->data_start = p->data_start;
+  np->data_end = p->data_end;
+  np->num_resident = 0; // Child starts with no resident pages
+  np->num_swapped = 0;
+  for(int j = 0; j < 16; j++) {
+    np->lazy_segs[j] = p->lazy_segs[j];
+    if(p->lazy_segs[j].ip) {
+      idup(p->lazy_segs[j].ip); // increment inode reference count
+    }
+  }
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -519,9 +556,9 @@ forkret(void)
     // ensure other cores see first=0.
     __sync_synchronize();
 
-    // We can invoke kexec() now that file system is initialized.
-    // Put the return value (argc) of kexec into a0.
-    p->trapframe->a0 = kexec("/init", (char *[]){ "/init", 0 });
+    // We can invoke exec() now that file system is initialized.
+    // Put the return value (argc) of exec into a0.
+    p->trapframe->a0 = exec("/init", (char *[]){ "/init", 0 });
     if (p->trapframe->a0 == -1) {
       panic("exec");
     }
