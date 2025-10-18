@@ -1,3 +1,4 @@
+// ############## LLM Generated Code Begins ##############
 #include "cshark.h"
 
 stored_packet_t packet_storage[MAX_PACKETS];
@@ -67,3 +68,4 @@ void list_stored_packets() {
     }
     printf("\n");
 }
+// ############## LLM Generated Code Ends ################

@@ -8,7 +8,6 @@
 #include "elf.h"
 
 
-
 // map ELF permissions to PTE permission bits.
 int flags2perm(int flags)
 {
@@ -77,7 +76,9 @@ exec(char *path, char **argv)
     p->lazy_segs[p->lazy_nseg].filesz = ph.filesz;
     p->lazy_segs[p->lazy_nseg].memsz = ph.memsz;
     p->lazy_segs[p->lazy_nseg].fileoff = ph.off;
+    p->lazy_segs[p->lazy_nseg].flags = ph.flags;
     p->lazy_segs[p->lazy_nseg].ip = ip;
+    p->lazy_segs[p->lazy_nseg].flags = ph.flags;
     p->lazy_nseg++;
     
     if(ph.vaddr + ph.memsz > sz)
@@ -189,7 +190,7 @@ exec(char *path, char **argv)
   
   // Free old pagetable with its original size
   if(oldpagetable && oldpagetable != pagetable) {
-    proc_freepagetable(oldpagetable, oldsz);  // Free old pagetable
+    proc_freepagetable(oldpagetable, oldsz); 
   }
 
   // Keep reference to inode for lazy loading

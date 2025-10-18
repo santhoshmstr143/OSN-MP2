@@ -67,6 +67,28 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  // } else {
+  //   uint64 scause = r_scause();
+  //   uint64 stval = r_stval(); // faulting virtual address
+    
+  //   // Handle page faults
+  //   if (scause == 12 || scause == 13 || scause == 15) {
+  //     // 12: Instruction page fault, 13: Load page fault, 15: Store/AMO page fault
+  //     int is_write = (scause == 15) ? 1 : 0;
+  //     int is_exec = (scause == 12) ? 1 : 0;
+      
+  //     // Try to handle the page fault with new comprehensive implementation
+  //     if (demand_page_load_new(stval, is_write, is_exec) == 0) {
+  //       // Successfully handled page fault, return to user
+  //       goto usertrapret;
+  //     }
+  //     // If demand_page_load failed, fall through to kill process
+  //   }
+    
+  //   printf("usertrap(): unexpected scause %lx pid=%d\n", r_scause(), p->pid);
+  //   printf("            sepc=%lx stval=%lx\n", r_sepc(), r_stval());
+  //   setkilled(p);
+  // }
   } else {
     uint64 scause = r_scause();
     uint64 stval = r_stval(); // faulting virtual address
@@ -82,12 +104,14 @@ usertrap(void)
         // Successfully handled page fault, return to user
         goto usertrapret;
       }
-      // If demand_page_load failed, fall through to kill process
+      // If demand_page_load failed, kill the process
+      setkilled(p);
     }
-    
-    printf("usertrap(): unexpected scause %lx pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%lx stval=%lx\n", r_sepc(), r_stval());
-    setkilled(p);
+    else {
+      printf("usertrap(): unexpected scause %lx pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%lx stval=%lx\n", r_sepc(), r_stval());
+      setkilled(p);
+    }
   }
 
   if(killed(p))

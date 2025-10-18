@@ -21,14 +21,12 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
-  int user_page_count;  // Track user allocations only
 } kmem;
 
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
-  kmem.user_page_count = 0;  // Initialize counter
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -61,12 +59,6 @@ kfree(void *pa)
   acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
-  
-  // Decrement user page count (if it was a user allocation)
-  if(kmem.user_page_count > 0) {
-    kmem.user_page_count--;
-  }
-  
   release(&kmem.lock);
 }
 
@@ -77,30 +69,14 @@ void *
 kalloc(void)
 {
   struct run *r;
-  struct proc *p = myproc();  // Get current process
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  
-  if(r) {
-    // Only limit user process allocations, not kernel allocations
-    if(p != 0) {  // This is a user process allocation
-      // Artificial limit for testing page replacement
-      #define MAX_USER_PAGES 40  // Limit for user processes only
-      
-      if(kmem.user_page_count >= MAX_USER_PAGES) {
-        release(&kmem.lock);
-        return 0;  // Pretend we're out of memory
-      }
-      kmem.user_page_count++;
-    }
-    
+  if(r)
     kmem.freelist = r->next;
-  }
-  
   release(&kmem.lock);
 
   if(r)
-    memset((char*)r, 5, PGSIZE);
+    memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }

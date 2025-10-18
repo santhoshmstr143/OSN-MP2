@@ -90,6 +90,7 @@ struct lazy_seg {
   uint64 filesz;    // bytes in file
   uint64 memsz;     // bytes in memory
   uint64 fileoff;   // offset in file
+  int flags;        // ELF segment flags (PF_R=4, PF_W=2, PF_X=1)
   struct inode *ip; // inode that backs this segment (exec)
 };
 
@@ -143,7 +144,7 @@ struct proc {
     uint64 va;
     int slot;
     char data[4096];  // ACTUAL PAGE DATA stored here
-  } swapped_pages[256];
+  } swapped_pages[8];  // Reduced to 8 for lower memory overhead (32KB per process)
   int num_swapped;
   
   // Swap file management (in-memory simulation)

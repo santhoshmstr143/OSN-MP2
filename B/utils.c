@@ -1,3 +1,4 @@
+// ############## LLM Generated Code Begins ##############
 #include "cshark.h"
 
 void print_hex_bytes(const u_char *data, int len) {
@@ -75,3 +76,4 @@ void sigint_handler(int signo) {
     (void)signo;
     stop_sniffing = 1;
 }
+// ############## LLM Generated Code Ends ################

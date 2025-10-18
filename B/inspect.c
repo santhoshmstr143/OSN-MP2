@@ -1,3 +1,4 @@
+// ############## LLM Generated Code Begins ##############
 #include "cshark.h"
 
 void inspect_packet_detailed(int packet_id) {
@@ -326,3 +327,4 @@ void inspect_last_session() {
     printf("\nPress Enter to continue...");
     getchar();
 }
+// ############## LLM Generated Code Ends ################

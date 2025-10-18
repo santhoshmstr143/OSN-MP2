@@ -1,3 +1,4 @@
+// ############## LLM Generated Code Begins ##############
 #include "cshark.h"
 
 int select_interface(char *selected_dev, size_t dev_size) {
@@ -81,3 +82,4 @@ void start_sniffing_all(const char *device) {
     pcap_close(handle);
     printf("\n[C-Shark] Capture stopped. Captured %d packets. Returning to menu.\n", stored_packet_count);
 }
+// ############## LLM Generated Code Ends ################

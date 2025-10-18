@@ -93,7 +93,6 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
-
 uint64
 sys_memstat(void)
 {
@@ -108,9 +107,8 @@ sys_memstat(void)
   stat.num_swapped_pages = p->num_swapped;
   stat.next_fifo_seq = p->pf_seq + 1;
   
-  // Calculate total pages
-  stat.num_pages_total = p->sz / PGSIZE;
-  if(p->sz % PGSIZE != 0) stat.num_pages_total++;
+  // Calculate total pages - round up
+  stat.num_pages_total = PGROUNDUP(p->sz) / PGSIZE;
   
   // Fill page info
   int page_count = 0;
@@ -121,21 +119,21 @@ sys_memstat(void)
     stat.pages[page_count].seq = 0;
     stat.pages[page_count].swap_slot = -1;
     
-    // Check if resident
-    int found = 0;
+    // Check if page is resident
+    int found_resident = 0;
     for(int i = 0; i < p->num_resident; i++) {
       if(p->resident_pages[i].va == va) {
         stat.pages[page_count].state = RESIDENT;
         stat.pages[page_count].is_dirty = p->resident_pages[i].is_dirty;
         stat.pages[page_count].seq = p->resident_pages[i].seq;
         stat.pages[page_count].swap_slot = p->resident_pages[i].swap_slot;
-        found = 1;
+        found_resident = 1;
         break;
       }
     }
     
     // Check if swapped (only if not resident)
-    if(!found) {
+    if(!found_resident) {
       for(int i = 0; i < p->num_swapped; i++) {
         if(p->swapped_pages[i].va == va) {
           stat.pages[page_count].state = SWAPPED;

@@ -1,3 +1,4 @@
+// ############## LLM Generated Code Begins ##############
 #ifndef CSHARK_H
 #define CSHARK_H
 
@@ -56,3 +57,4 @@ void start_sniffing_filtered(const char *device);
 void inspect_last_session();
 
 #endif
+// ############## LLM Generated Code Ends ################

@@ -1,3 +1,4 @@
+// ############## LLM Generated Code Begins ##############
 #include "cshark.h"
 
 void filtered_packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
@@ -101,3 +102,4 @@ void start_sniffing_filtered(const char *device) {
     pcap_close(handle);
     printf("\n[C-Shark] Filtered capture stopped. Captured %d packets. Returning to menu.\n", stored_packet_count);
 }
+// ############## LLM Generated Code Ends ################

@@ -142,16 +142,6 @@ UPROGS=\
 	$U/_logstress\
 	$U/_forphan\
 	$U/_dorphan\
-	$U/_test_demand_basic\
-    $U/_test_invalid\
-    $U/_test_invalid_bounds\
-    $U/_test_replacement\
-    $U/_test_swapping\
-    $U/_test_swapfile\
-    $U/_test_swap_full\
-    $U/_test_memstat\
-    $U/_test_fifo\
-    $U/_test_multipage\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

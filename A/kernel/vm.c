@@ -282,10 +282,8 @@ void freewalk(pagetable_t pagetable)
       freewalk((pagetable_t)child);
       pagetable[i] = 0;
     }
-    else if (pte & PTE_V)
-    {
-      panic("freewalk: leaf");
-    }
+    // REMOVED: else if (pte & PTE_V) { panic("freewalk: leaf"); }
+    // With demand paging, leaf pages should be cleaned by uvmunmap before freewalk
   }
   kfree((void *)pagetable);
 }
@@ -403,6 +401,9 @@ int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   while (len > 0)
   {
     va0 = PGROUNDDOWN(srcva);
+    if (va0 >= MAXVA)
+      return -1;
+      
     pa0 = walkaddr(pagetable, va0);
     if (pa0 == 0)
     {
@@ -428,10 +429,6 @@ int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   return 0;
 }
 
-// Copy a null-terminated string from user to kernel.
-// Copy bytes to dst from virtual address srcva in a given page table,
-// until a '\0', or max.
-// Return 0 on success, -1 on error.
 int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
   uint64 n, va0, pa0;
@@ -440,19 +437,23 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   while (got_null == 0 && max > 0)
   {
     va0 = PGROUNDDOWN(srcva);
+    if (va0 >= MAXVA)  // ADD THIS
+      return -1;
+      
     pa0 = walkaddr(pagetable, va0);
     if (pa0 == 0)
     {
       if (demand_page_load_new(va0, 0, 0) != 0)
       {
-        return -1;
+        return -1;  // MAKE SURE THIS IS HERE
       }
       pa0 = walkaddr(pagetable, va0);
       if (pa0 == 0)
       {
-        return -1;
+        return -1;  // MAKE SURE THIS IS HERE
       }
     }
+    
     n = PGSIZE - (srcva - va0);
     if (n > max)
       n = max;
@@ -487,6 +488,7 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
 
 // allocate and map user memory if process is referencing a page
 // that was lazily allocated in sys_sbrk().
@@ -531,7 +533,6 @@ int ismapped(pagetable_t pagetable, uint64 va)
   return 0;
 }
 
-// Find which lazy segment (if any) contains va. Returns index or -1.
 static int
 lazy_seg_find(struct proc *p, uint64 va, uint64 *seg_vstart)
 {
@@ -549,29 +550,24 @@ lazy_seg_find(struct proc *p, uint64 va, uint64 *seg_vstart)
   return -1;
 }
 
-// Load a single page for process p at virtual address va
 int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_write, int is_exec)
 {
   uint64 a = PGROUNDDOWN(va);
 
-  // Check if already mapped
   pte_t *pte = walk(pagetable, a, 0);
   if (pte && (*pte & PTE_V))
   {
-    return 0; // already resident
+    return 0; 
   }
 
-  // Log the page fault
   printf("PAGEFAULT pid=%d va=0x%lx write=%d exec=%d\n", p->pid, va, is_write, is_exec);
 
-  // Check if va is in an executable segment
   uint64 seg_vstart;
   int si = lazy_seg_find(p, va, &seg_vstart);
   char *mem = 0;
 
   if (si >= 0)
   {
-    // File-backed load (LOADEXEC)
     struct lazy_seg *seg = &p->lazy_segs[si];
     mem = kalloc();
     if (!mem)
@@ -581,7 +577,6 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
     }
     memset(mem, 0, PGSIZE);
 
-    // Calculate file offset for this page
     uint64 page_offset_in_seg = a - seg->vaddr;
     uint64 file_read_start = seg->fileoff + page_offset_in_seg;
     uint64 toread = 0;
@@ -592,7 +587,7 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
       if (toread > PGSIZE)
         toread = PGSIZE;
 
-      // Read from inode
+      
       ilock(seg->ip);
       int r = readi(seg->ip, 0, (uint64)mem, file_read_start, toread);
       iunlock(seg->ip);
@@ -608,10 +603,8 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
   }
   else
   {
-    // Not file-backed. Check if it's heap or stack
     if (a >= PGROUNDDOWN(p->lazy_heap_start) && a < p->sz)
     {
-      // Heap page
       mem = kalloc();
       if (!mem)
       {
@@ -621,7 +614,6 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
       memset(mem, 0, PGSIZE);
       printf("ALLOC pid=%d addr=0x%lx (heap)\n", p->pid, a);
 
-      // Update max allocated address
       if (a + PGSIZE > p->lazy_max_addr)
       {
         p->lazy_max_addr = a + PGSIZE;
@@ -629,7 +621,6 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
     }
     else if (a >= p->lazy_stack_top && a < p->lazy_stack_top + 10 * PGSIZE)
     {
-      // Stack page (starting at stack_top and growing upward, within reasonable limits)
       mem = kalloc();
       if (!mem)
       {
@@ -639,13 +630,11 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
       memset(mem, 0, PGSIZE);
       printf("ALLOC pid=%d addr=0x%lx (stack)\n", p->pid, a);
 
-      // Update process size to include this stack page
       if (a + PGSIZE > p->sz)
       {
         p->sz = a + PGSIZE;
       }
 
-      // Update max allocated address
       if (a + PGSIZE > p->lazy_max_addr)
       {
         p->lazy_max_addr = a + PGSIZE;
@@ -653,7 +642,6 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
     }
     else if (p->sz == 0 && a < 0x100000)
     {
-      // Special case: exec-time stack setup (process not fully initialized)
       mem = kalloc();
       if (!mem)
       {
@@ -663,7 +651,6 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
       memset(mem, 0, PGSIZE);
       printf("ALLOC pid=%d addr=0x%lx (exec-stack)\n", p->pid, a);
 
-      // Update max allocated address
       if (a + PGSIZE > p->lazy_max_addr)
       {
         p->lazy_max_addr = a + PGSIZE;
@@ -671,14 +658,12 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
     }
     else
     {
-      // Outside valid ranges: kill process
       printf("PAGEFAULT_OUTSIDE pid=%d va=0x%lx\n", p->pid, va);
       p->killed = 1;
       return -1;
     }
   }
 
-  // Map the page
   int perm = PTE_U;
   if (is_write || (si >= 0))
     perm |= PTE_W;
@@ -687,7 +672,7 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
   if (is_exec)
     perm |= PTE_X;
   else
-    perm |= PTE_R | PTE_W; // for data pages
+    perm |= PTE_R | PTE_W; 
 
   if (mappages(pagetable, a, PGSIZE, (uint64)mem, perm) != 0)
   {
@@ -695,30 +680,24 @@ int demand_page_load(pagetable_t pagetable, struct proc *p, uint64 va, int is_wr
     printf("demand_page_load: mappages failed\n");
     return -1;
   }
-
-  // Emit RESIDENT record
   p->pf_seq++;
   printf("RESIDENT pid=%d seq=%ld va=0x%lx\n", p->pid, p->pf_seq, a);
 
   return 0;
 }
 
-// PagedOut Inc. helper functions for comprehensive demand paging
 
 void add_resident_page(struct proc *p, uint64 va, int is_dirty)
 {
-  // ALWAYS increment sequence first
   p->pf_seq++;
 
   if (p->num_resident >= 256)
   {
-    // Resident array is full, but sequence still incremented
-    // In production, trigger page replacement here
     panic("resident set full - page replacement needed");
   }
 
   p->resident_pages[p->num_resident].va = va;
-  p->resident_pages[p->num_resident].seq = p->pf_seq; // Use already incremented value
+  p->resident_pages[p->num_resident].seq = p->pf_seq; 
   p->resident_pages[p->num_resident].is_dirty = is_dirty;
   p->resident_pages[p->num_resident].swap_slot = -1;
   p->num_resident++;
@@ -730,7 +709,6 @@ void remove_resident_page(struct proc *p, uint64 va)
   {
     if (p->resident_pages[i].va == va)
     {
-      // Shift remaining entries
       for (int j = i; j < p->num_resident - 1; j++)
       {
         p->resident_pages[j] = p->resident_pages[j + 1];
@@ -766,7 +744,7 @@ int find_free_swap_slot(struct proc *p)
   {
     if (p->swap_slots[i] == 0)
     {
-      p->swap_slots[i] = 1; // Mark as used
+      p->swap_slots[i] = 1; 
       return i;
     }
   }
@@ -775,7 +753,6 @@ int find_free_swap_slot(struct proc *p)
 
 void init_swap_file(struct proc *p)
 {
-  // Create per-process swap file name: /pgswpXXXXX where XXXXX is PID
   p->swap_filename[0] = '/';
   p->swap_filename[1] = 'p';
   p->swap_filename[2] = 'g';
@@ -783,7 +760,6 @@ void init_swap_file(struct proc *p)
   p->swap_filename[4] = 'w';
   p->swap_filename[5] = 'p';
 
-  // Convert PID to 5-digit string
   int pid = p->pid;
   for (int i = 10; i >= 6; i--)
   {
@@ -791,16 +767,11 @@ void init_swap_file(struct proc *p)
     pid /= 10;
   }
   p->swap_filename[11] = '\0';
-
-  // Skip actual file creation to avoid locking issues
-  // Just set up tracking structures
-
   p->num_swapped = 0;
 }
 
 void cleanup_swap_file(struct proc *p)
 {
-  // Clear swap slots without locking (safe during cleanup)
   int freed_slots = 0;
   for (int i = 0; i < 1024; i++)
   {
@@ -815,11 +786,6 @@ void cleanup_swap_file(struct proc *p)
   {
     printf("[pid %d] SWAPCLEANUP freed_slots=%d\n", p->pid, freed_slots);
   }
-
-  // No file operations needed since swapping is memory-only now
-  // p->swap_file = 0;
-
-  // Clear resident pages tracking
   p->num_resident = 0;
   p->num_swapped = 0;
   p->pf_seq = 0;
@@ -827,26 +793,19 @@ void cleanup_swap_file(struct proc *p)
 
 int swap_out_page(struct proc *p, uint64 va, int slot)
 {
-  // Get physical address of the page being swapped out
   pte_t *pte = walk(p->pagetable, va, 0);
   if (pte == 0 || (*pte & PTE_V) == 0)
   {
     return -1;
   }
-
-  // Save page data to swapped_pages array
-  if (p->num_swapped >= 256)
+  if (p->num_swapped >= 8)
   {
-    return -1; // No space for swapped pages
+    return -1; 
   }
-
-  // Get the physical address and SAVE THE ACTUAL DATA!
   uint64 pa = PTE2PA(*pte);
   
-  // Copy actual page contents to swap storage
   memmove(p->swapped_pages[p->num_swapped].data, (void*)pa, PGSIZE);
   
-  // Record the swap mapping
   p->swapped_pages[p->num_swapped].va = va;
   p->swapped_pages[p->num_swapped].slot = slot;
   p->num_swapped++;
@@ -857,7 +816,6 @@ int swap_out_page(struct proc *p, uint64 va, int slot)
 
 int swap_in_page(struct proc *p, uint64 va, int slot, char *mem)
 {
-  // Find the swapped page
   int found = -1;
   for (int i = 0; i < p->num_swapped; i++)
   {
@@ -894,6 +852,9 @@ int swap_in_page(struct proc *p, uint64 va, int slot, char *mem)
 int demand_page_load_new(uint64 va, int is_write, int is_exec)
 {
   struct proc *p = myproc();
+  if(va >= MAXVA) {
+    return -1;  // Return immediately, don't process
+  }
   uint64 a = PGROUNDDOWN(va);
 
   // Check if already mapped
@@ -903,6 +864,10 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
     // Page is resident, check if we need to mark it dirty
     if (is_write)
     {
+      // Check write permission
+      if ((*pte & PTE_W) == 0) {
+        return -1; // Write to read-only page
+      }
       for (int i = 0; i < p->num_resident; i++)
       {
         if (p->resident_pages[i].va == a)
@@ -920,7 +885,6 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
   char *cause = "unknown";
 
   // Check if this is a swapped page first
-  // Check if this is a swapped page first
   int swap_slot = -1;
   for (int i = 0; i < p->num_swapped; i++)
   {
@@ -933,10 +897,11 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
   }
 
   // Determine cause if not swapped
+  uint64 seg_vstart;
+  int si = -1;
   if (swap_slot < 0)
   {
-    uint64 seg_vstart;
-    int si = lazy_seg_find(p, va, &seg_vstart);
+    si = lazy_seg_find(p, va, &seg_vstart);
     if (si >= 0)
     {
       cause = "exec";
@@ -947,8 +912,8 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
     }
     else
     {
-      // Check if it's stack growth - allow growth down from top of memory
-      if (a >= PGROUNDDOWN(p->sz - 2 * PGSIZE) && a < p->sz)
+      // Check if it's stack - within reasonable distance from sz
+      if (a < p->sz && a >= PGROUNDDOWN(p->sz - USERSTACK * PGSIZE))
       {
         cause = "stack";
       }
@@ -959,8 +924,6 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
   printf("[pid %d] PAGEFAULT va=0x%lx access=%s cause=%s\n", p->pid, va, access_type, cause);
 
   // Check for invalid access
-  uint64 seg_vstart;
-  int si = lazy_seg_find(p, va, &seg_vstart);
   int is_valid = 0;
 
   if (si >= 0)
@@ -977,8 +940,8 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
   }
   else
   {
-    // Check stack - allow growth down from top of memory
-    if (a >= PGROUNDDOWN(p->sz - 2 * PGSIZE) && a < p->sz)
+    // Check stack - allow growth within reasonable range
+    if (a < p->sz && a >= PGROUNDDOWN(p->sz - USERSTACK * PGSIZE))
     {
       is_valid = 1; // Stack growth
     }
@@ -986,14 +949,22 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
 
   if (!is_valid)
   {
-    printf("[pid %d] KILL invalid-access va=0x%lx access=%s\n", p->pid, va, access_type);
-    p->killed = 1;
-    kexit(-1);
+    // Invalid access - return error without killing
+    printf("[pid %d] INVALID-ACCESS va=0x%lx access=%s\n", p->pid, va, access_type);
     return -1;
   }
 
   // Try to allocate memory
-  char *mem = kalloc();
+  char *mem = 0;
+  #define MAX_RESIDENT_PAGES 40
+  
+  if(p->num_resident >= MAX_RESIDENT_PAGES) {
+    // Force page replacement
+    mem = 0;
+  } else {
+    // Try to allocate memory
+    mem = kalloc();
+  }
 
   // If allocation failed, trigger page replacement
   if (!mem)
@@ -1005,8 +976,7 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
     if (victim_idx < 0)
     {
       printf("[pid %d] KILL no-resident-pages\n", p->pid);
-      setkilled(p);
-      return -1;
+      return -1; // Don't call setkilled here
     }
 
     uint64 victim_va = p->resident_pages[victim_idx].va;
@@ -1024,17 +994,14 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
       {
         printf("[pid %d] SWAPFULL\n", p->pid);
         printf("[pid %d] KILL swap-exhausted\n", p->pid);
-        setkilled(p);
-        return -1;
+        return -1; // Don't call setkilled here
       }
 
       if (swap_out_page(p, victim_va, slot) < 0)
       {
-        // swap_out failed (ran out of swapped_pages array)
         printf("[pid %d] SWAPFULL\n", p->pid);
         printf("[pid %d] KILL swap-exhausted\n", p->pid);
-        setkilled(p);
-        return -1;
+        return -1; // Don't call setkilled here
       }
     }
     else
@@ -1059,14 +1026,16 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
     if (!mem)
     {
       printf("[pid %d] KILL allocation-failed\n", p->pid);
-      setkilled(p);
-      return -1;
+      return -1; // Don't call setkilled here
     }
   }
 
   // Load the page content
   memset(mem, 0, PGSIZE);
-
+////////////////////////
+  // Determine permissions
+  int perm = PTE_U;
+  
   if (swap_slot >= 0)
   {
     // Load from swap - pass the allocated memory
@@ -1076,6 +1045,7 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
       return -1;
     }
     printf("[pid %d] SWAPIN va=0x%lx slot=%d\n", p->pid, a, swap_slot);
+    perm |= PTE_R | PTE_W | PTE_X; // Swapped pages get full permissions
   }
   else if (si >= 0)
   {
@@ -1101,15 +1071,18 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
       }
     }
     printf("[pid %d] LOADEXEC va=0x%lx\n", p->pid, a);
+    
+    int seg_perm = flags2perm(seg->flags);
+    perm |= PTE_R | seg_perm; // Always readable for user, plus segment-specific perms
   }
   else
   {
-    // Zero-filled page (heap or stack)
     printf("[pid %d] ALLOC va=0x%lx\n", p->pid, a);
+    perm |= PTE_R | PTE_W | PTE_X; // Heap/stack get full permissions
   }
-
-  // Map the page
-  if (mappages(p->pagetable, a, PGSIZE, (uint64)mem, PTE_U | PTE_R | PTE_W | PTE_X) != 0)
+/////////////////////////////
+  // Map the page with determined permissions
+  if (mappages(p->pagetable, a, PGSIZE, (uint64)mem, perm) != 0)
   {
     kfree(mem);
     return -1;
@@ -1122,7 +1095,7 @@ int demand_page_load_new(uint64 va, int is_write, int is_exec)
   return 0;
 }
 
-// Modify growproc to only adjust proc->sz without allocating pages
+
 int growproc(int n)
 {
   uint64 sz;
@@ -1132,14 +1105,31 @@ int growproc(int n)
   if (n > 0)
   {
     // Growing: just increase size, don't allocate pages
+    if (sz + n > 100 * 1024 * 1024) {
+      return -1;  // Would exceed reasonable virtual address space
+    }
     p->sz = sz + n;
   }
   else if (n < 0)
   {
-    // Shrinking: free pages and decrease size
-    if (sz + n < p->lazy_heap_start)
+    // Shrinking: deallocate pages and clean up resident tracking
+    uint64 newsz = sz + n;
+    if (newsz < p->lazy_heap_start)
       return -1;
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+      
+    // Remove resident pages in the deallocated range
+    for(int i = 0; i < p->num_resident; i++) {
+      if(p->resident_pages[i].va >= newsz && p->resident_pages[i].va < sz) {
+        // Remove this resident page
+        for(int j = i; j < p->num_resident - 1; j++) {
+          p->resident_pages[j] = p->resident_pages[j+1];
+        }
+        p->num_resident--;
+        i--; // Recheck this index
+      }
+    }
+    
+    sz = uvmdealloc(p->pagetable, sz, newsz);
     p->sz = sz;
   }
   return 0;

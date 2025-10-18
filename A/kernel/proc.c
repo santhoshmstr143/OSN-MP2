@@ -119,6 +119,7 @@ allocproc(void)
       release(&p->lock);
     }
   }
+  printf("[allocproc] no free proc slots\n");
   return 0;
 
 found:
@@ -127,6 +128,7 @@ found:
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
+    printf("[allocproc] trapframe kalloc failed\n");
     freeproc(p);
     release(&p->lock);
     return 0;
@@ -135,6 +137,7 @@ found:
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
+    printf("[allocproc] proc_pagetable failed\n");
     freeproc(p);
     release(&p->lock);
     return 0;
@@ -278,16 +281,39 @@ kfork(void)
 
   // Allocate process.
   if((np = allocproc()) == 0){
+    printf("[fork] allocproc failed\n");
     return -1;
   }
 
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+    printf("[fork] uvmcopy failed\n");
     freeproc(np);
     release(&np->lock);
     return -1;
   }
   np->sz = p->sz;
+
+  // // Copy lazy paging metadata
+  // np->lazy_heap_start = p->lazy_heap_start;
+  // np->lazy_stack_top = p->lazy_stack_top;
+  // np->lazy_max_addr = p->lazy_max_addr;
+  // np->pf_seq = 0;  // Child starts with fresh FIFO sequence
+  // np->lazy_nseg = p->lazy_nseg;
+  
+  // // Copy PagedOut Inc. metadata
+  // np->text_start = p->text_start;
+  // np->text_end = p->text_end;
+  // np->data_start = p->data_start;
+  // np->data_end = p->data_end;
+  // np->num_resident = 0; // Child starts with no resident pages
+  // np->num_swapped = 0;
+  // for(int j = 0; j < 16; j++) {
+  //   np->lazy_segs[j] = p->lazy_segs[j];
+  //   if(p->lazy_segs[j].ip) {
+  //     idup(p->lazy_segs[j].ip); // increment inode reference count
+  //   }
+  // }
 
   // Copy lazy paging metadata
   np->lazy_heap_start = p->lazy_heap_start;
@@ -303,12 +329,28 @@ kfork(void)
   np->data_end = p->data_end;
   np->num_resident = 0; // Child starts with no resident pages
   np->num_swapped = 0;
+  
+  // Initialize child's resident and swap tracking
+  for(int j = 0; j < 256; j++) {
+    np->resident_pages[j].va = 0;
+    np->resident_pages[j].seq = 0;
+    np->resident_pages[j].is_dirty = 0;
+    np->resident_pages[j].swap_slot = -1;
+  }
+  for(int j = 0; j < 1024; j++) {
+    np->swap_slots[j] = 0;
+  }
+  
+  // Copy lazy segment info and increment inode refcounts
   for(int j = 0; j < 16; j++) {
     np->lazy_segs[j] = p->lazy_segs[j];
     if(p->lazy_segs[j].ip) {
       idup(p->lazy_segs[j].ip); // increment inode reference count
     }
   }
+  
+  // Initialize child's own swap file
+  init_swap_file(np);
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
